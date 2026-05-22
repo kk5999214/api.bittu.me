@@ -14,7 +14,7 @@ from app.info_core import extract_player_info, get_valid_jwt
 from app.stats_core import extract_all_stats
 
 # Docs hidden for a stealthy, professional API feel 💀
-app = FastAPI(title="BITTU__DEV Master API", version="8.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="BITTU__DEV Master API", version="9.0", docs_url=None, redoc_url=None)
 
 ACCOUNTS_FILE = "GuestAccounts.json"
 
@@ -202,7 +202,6 @@ async def get_player_stats(uid: str = Query(...), region: str = Query("IND"), mo
             "level": basic_info.get("level", 0)
         }
 
-        # 💀 THE FINAL FIX: Fully personalized response block
         return JSONResponse(content={
             "Developer": "BITTU_DEV",
             "Status": "Success",
@@ -222,3 +221,20 @@ async def get_player_stats(uid: str = Query(...), region: str = Query("IND"), mo
              return JSONResponse(status_code=401, content={"Developer": "BITTU_DEV", "Error": "401 Unauthorized", "Message": "Token Expired Or Rejected. Cache Cleared. Try Again."})
              
         return JSONResponse(status_code=500, content={"Developer": "BITTU_DEV", "Error": "500 Internal Error", "Message": f"Extraction Failed: {str(e)}"})
+
+@app.get("/bancheck")
+async def get_ban_status(uid: str = Query(...)):
+    if not uid.isdigit():
+        return JSONResponse(status_code=400, content={"Developer": "BITTU_DEV", "Error": "400 Bad Request", "Message": "Invalid UID Format. Must Be Numeric."})
+        
+    try:
+        from app.ban_core import check_player_ban
+        result = await check_player_ban(uid)
+        
+        return JSONResponse(content={
+            "Developer": "BITTU_DEV",
+            "Status": "Success",
+            "Data": result
+        })
+    except Exception as e:
+        return JSONResponse(status_code=404, content={"Developer": "BITTU_DEV", "Error": "404 Not Found", "Message": str(e)})
