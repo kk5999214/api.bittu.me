@@ -137,7 +137,7 @@ async def internal_get_valid_jwt(region: str) -> str:
         active_account = random.choice(account_pool)
         try:
             result = await create_jwt(active_account["uid"], active_account["password"], region)
-            token = result.get("Token")
+            token = result.get("token")
             if token and token != "0":
                 TOKEN_CACHE[region] = {"token": token, "expires": now + 7200}
                 return token
