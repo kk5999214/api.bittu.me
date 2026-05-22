@@ -121,8 +121,7 @@ async def create_jwt(uid: str, password: str, region: str = "IND", bypass_token:
             raise RuntimeError(f"Failed To Obtain JWT")
 
         return {
-            "Token": token,
+            "token": token,
             "LockRegion": lock_region,
             "ServerUrl": server_url,
         }
-
