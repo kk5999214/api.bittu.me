@@ -48,7 +48,7 @@ async def get_valid_jwt(region: str) -> str:
         return TOKEN_CACHE[region]["token"]
         
     async with httpx.AsyncClient(verify=False) as client:
-        url = f"{JWT_API_BASE}/api/token?region={region}"
+        url = f"{JWT_API_BASE}/token?region={region}"
         r = await client.get(url, timeout=20.0)
         
         if r.status_code != 200:
