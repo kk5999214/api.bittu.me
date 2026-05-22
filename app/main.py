@@ -1,19 +1,17 @@
 import json
 import os
 import random
-import time
 from fastapi import FastAPI, Query, Body, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 
 from app.jwt_core import create_jwt
-from app.info_core import extract_player_info
+from app.info_core import extract_player_info, get_valid_jwt
 
-app = FastAPI(title="BITTU__DEV Master API", version="5.0")
+app = FastAPI(title="BITTU__DEV Master API", version="6.0")
 
 ACCOUNTS_FILE = "GuestAccounts.json"
-TOKEN_CACHE = {}
 
 def load_accounts():
     if os.path.exists(ACCOUNTS_FILE):
@@ -33,9 +31,8 @@ class TokenRequest(BaseModel):
 @app.get("/")
 async def root():
     return JSONResponse(content={
-        "Status": "Master API Live Vercel Edition 💀",
+        "Status": "Master API Live Vercel Decoupled Edition 💀",
         "Loaded_Regions": list(accounts_db.keys()),
-        "Cached_Tokens": len(TOKEN_CACHE),
         "Endpoints": [
             "/api/info?uid=PLAYER_UID&region=IND",
             "/api/token?uid=xxx&password=yyy&region=IND",
@@ -121,31 +118,6 @@ async def post_token(payload: TokenRequest = Body(...)):
         open_id=payload.open_id
     )
 
-async def internal_get_valid_jwt(region: str) -> str:
-    now = time.time()
-    
-    if region in TOKEN_CACHE and TOKEN_CACHE[region]["expires"] > now:
-        return TOKEN_CACHE[region]["token"]
-        
-    if region not in accounts_db or not accounts_db[region]:
-        raise ValueError(f"No Accounts Available To Generate Token For {region}")
-        
-    account_pool = accounts_db[region]
-    max_retries = 2
-    
-    for attempt in range(max_retries):
-        active_account = random.choice(account_pool)
-        try:
-            result = await create_jwt(active_account["uid"], active_account["password"], region)
-            token = result.get("token")
-            if token and token != "0":
-                TOKEN_CACHE[region] = {"token": token, "expires": now + 7200}
-                return token
-        except Exception:
-            continue
-            
-    raise ValueError(f"Internal Token Generation Failed For {region}")
-
 @app.get("/api/info")
 async def get_player_info(uid: str = Query(...), region: str = Query("IND")):
     target_region = region.upper()
@@ -154,18 +126,19 @@ async def get_player_info(uid: str = Query(...), region: str = Query("IND")):
         raise HTTPException(status_code=400, detail="Invalid Uid Format Must Be Numeric")
 
     try:
-        jwt_token = await internal_get_valid_jwt(target_region)
+        jwt_token = await get_valid_jwt(target_region)
         result = await extract_player_info(uid, target_region, jwt_token)
 
         return JSONResponse(content={
             "Developer": "@BITTU__DEV",
-            "Status": "Success 🔥",
+            "Status": "Success",
             "Data": result
         })
 
     except Exception as e:
         err_str = str(e).lower()
         if "401" in err_str or "unauthorized" in err_str:
+             from app.info_core import TOKEN_CACHE
              TOKEN_CACHE.pop(target_region, None)
              raise HTTPException(status_code=401, detail="Token Expired Or Rejected Cache Cleared Try Again")
         raise HTTPException(status_code=500, detail=f"Extraction Failed {str(e)}")
