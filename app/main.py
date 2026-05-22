@@ -10,11 +10,11 @@ from pydantic import BaseModel
 from typing import Optional
 
 from app.jwt_core import create_jwt
-from app.info_core import extract_player_info, get_valid_jwt
+from app.info_core import extract_player_info, extract_clan_info, get_valid_jwt
 from app.stats_core import extract_all_stats
 
 # Docs hidden for a stealthy, professional API feel 💀
-app = FastAPI(title="BITTU__DEV Master API", version="9.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="BITTU__DEV Master API", version="10.0", docs_url=None, redoc_url=None)
 
 ACCOUNTS_FILE = "GuestAccounts.json"
 
@@ -187,7 +187,6 @@ async def get_player_stats(uid: str = Query(...), region: str = Query("IND"), mo
     try:
         jwt_token = await get_valid_jwt(target_region)
         
-        # We Run Both Profile Fetching And Stat Fetching At The Exact Same Time For Maximum Speed ⚡
         profile_task = extract_player_info(uid, target_region, jwt_token)
         stats_task = extract_all_stats(uid, target_region, jwt_token, req_mode, req_type)
         
@@ -238,3 +237,27 @@ async def get_ban_status(uid: str = Query(...)):
         })
     except Exception as e:
         return JSONResponse(status_code=404, content={"Developer": "BITTU_DEV", "Error": "404 Not Found", "Message": str(e)})
+
+@app.get("/clan")
+async def get_clan_data(id: str = Query(...), region: str = Query("IND")):
+    target_region = region.upper()
+    if not id.isdigit():
+        return JSONResponse(status_code=400, content={"Developer": "BITTU_DEV", "Error": "400 Bad Request", "Message": "Invalid Clan ID Format. Must Be Numeric."})
+        
+    try:
+        jwt_token = await get_valid_jwt(target_region)
+        result = await extract_clan_info(id, target_region, jwt_token)
+
+        return JSONResponse(content={
+            "Developer": "BITTU_DEV",
+            "Status": "Success",
+            "Data": result
+        })
+    except Exception as e:
+        err_str = str(e).lower()
+        if "401" in err_str or "unauthorized" in err_str:
+             from app.info_core import TOKEN_CACHE
+             TOKEN_CACHE.pop(target_region, None)
+             return JSONResponse(status_code=401, content={"Developer": "BITTU_DEV", "Error": "401 Unauthorized", "Message": "Token Expired Or Rejected. Cache Cleared. Try Again."})
+             
+        return JSONResponse(status_code=500, content={"Developer": "BITTU_DEV", "Error": "500 Internal Error", "Message": f"Extraction Failed: {str(e)}"})
