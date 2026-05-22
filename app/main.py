@@ -1,15 +1,18 @@
 import json
 import os
 import random
-from fastapi import FastAPI, Query, Body, HTTPException
+from fastapi import FastAPI, Query, Body, Request
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel
 from typing import Optional
 
 from app.jwt_core import create_jwt
 from app.info_core import extract_player_info, get_valid_jwt
 
-app = FastAPI(title="BITTU__DEV Master API", version="6.0")
+# Docs hidden for a stealthy, professional API feel
+app = FastAPI(title="BITTU__DEV Master API", version="7.0", docs_url=None, redoc_url=None)
 
 ACCOUNTS_FILE = "GuestAccounts.json"
 
@@ -28,20 +31,35 @@ class TokenRequest(BaseModel):
     access_token: Optional[str] = None
     open_id: Optional[str] = None
 
+# --- PROFESSIONAL ERROR HANDLERS ---
+@app.exception_handler(StarletteHTTPException)
+async def custom_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    if exc.status_code == 404:
+        return JSONResponse(
+            status_code=404,
+            content={"Developer": "BITTU_DEV", "Error": "404 Not Found", "Message": "Endpoint mismatch or route does not exist."}
+        )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"Developer": "BITTU_DEV", "Error": f"{exc.status_code} Error", "Message": exc.detail}
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=400,
+        content={"Developer": "BITTU_DEV", "Error": "400 Bad Request", "Message": "Parameter mismatch or invalid format."}
+    )
+# -----------------------------------
+
 @app.get("/")
 async def root():
     return JSONResponse(content={
-        "Status": "Master API Live Vercel Decoupled Edition 💀",
-        "Loaded_Regions": list(accounts_db.keys()),
-        "Endpoints": [
-            "/api/info?uid=PLAYER_UID&region=IND",
-            "/api/token?uid=xxx&password=yyy&region=IND",
-            "/api/token?region=IND",
-            "/api/token?access_token=xxx&open_id=yyy"
-        ]
+        "Developer": "BITTU_DEV",
+        "Status": "API Online"
     })
 
-@app.get("/api/token")
+@app.get("/token")
 async def get_token(
     region: Optional[str] = Query(None),
     uid: Optional[str] = Query(None), 
@@ -54,27 +72,26 @@ async def get_token(
         target_region = (region or "IND").upper()
         try:
             result = await create_jwt(uid="Bypass", password="None", region=target_region, bypass_token=access_token, bypass_id=open_id)
-            response_data = {"Developer": "BITTU__DEV", "Status": "Bypass Mode Active"}
+            response_data = {"Developer": "BITTU_DEV", "Status": "Bypass Mode Active"}
             response_data.update(result)
             return response_data
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            return JSONResponse(status_code=500, content={"Developer": "BITTU_DEV", "Error": "500 Internal Error", "Message": str(e)})
 
     elif uid and password:
         target_region = (region or "IND").upper()
         try:
             result = await create_jwt(uid, password, target_region)
-            response_data = {"Developer": "BITTU__DEV", "Uid": uid, "Password": password}
+            response_data = {"Developer": "BITTU_DEV", "Uid": uid, "Password": password}
             response_data.update(result)
             return response_data
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            return JSONResponse(status_code=500, content={"Developer": "BITTU_DEV", "Error": "500 Internal Error", "Message": str(e)})
 
     elif region:
         target_region = region.upper()
-        
         if target_region not in accounts_db or not accounts_db[target_region]:
-            raise HTTPException(status_code=404, detail=f"No Accounts Available For Region {target_region}")
+            return JSONResponse(status_code=404, content={"Developer": "BITTU_DEV", "Error": "404 Not Found", "Message": f"No Accounts Available For Region {target_region}"})
             
         account_pool = accounts_db[target_region]
         max_retries = 2
@@ -91,7 +108,7 @@ async def get_token(
             try:
                 result = await create_jwt(active_uid, active_pwd, target_region)
                 response_data = {
-                    "Developer": "BITTU__DEV",
+                    "Developer": "BITTU_DEV",
                     "Status": "Active",
                     "Region": target_region,
                     "Attempt": attempt + 1,
@@ -103,12 +120,12 @@ async def get_token(
             except Exception as e:
                 last_error = str(e)
                 
-        raise HTTPException(status_code=500, detail=f"Extraction Failed After {max_retries} Attempts Last Error {last_error}")
+        return JSONResponse(status_code=500, content={"Developer": "BITTU_DEV", "Error": "500 Internal Error", "Message": f"Extraction Failed After {max_retries} Attempts. Last Error: {last_error}"})
 
     else:
-        raise HTTPException(status_code=400, detail="Strictly Require Uid And Password OR Region OR Access Token And Open Id Parameters To Proceed")
+        return JSONResponse(status_code=400, content={"Developer": "BITTU_DEV", "Error": "400 Bad Request", "Message": "Strictly Require Uid & Password OR Region OR Access Token & Open Id."})
 
-@app.post("/api/token")
+@app.post("/token")
 async def post_token(payload: TokenRequest = Body(...)):
     return await get_token(
         region=payload.region, 
@@ -118,19 +135,19 @@ async def post_token(payload: TokenRequest = Body(...)):
         open_id=payload.open_id
     )
 
-@app.get("/api/info")
+@app.get("/info")
 async def get_player_info(uid: str = Query(...), region: str = Query("IND")):
     target_region = region.upper()
 
     if not uid.isdigit():
-        raise HTTPException(status_code=400, detail="Invalid Uid Format Must Be Numeric")
+        return JSONResponse(status_code=400, content={"Developer": "BITTU_DEV", "Error": "400 Bad Request", "Message": "Invalid UID Format. Must Be Numeric."})
 
     try:
         jwt_token = await get_valid_jwt(target_region)
         result = await extract_player_info(uid, target_region, jwt_token)
 
         return JSONResponse(content={
-            "Developer": "@BITTU__DEV",
+            "Developer": "BITTU_DEV",
             "Status": "Success",
             "Data": result
         })
@@ -140,5 +157,6 @@ async def get_player_info(uid: str = Query(...), region: str = Query("IND")):
         if "401" in err_str or "unauthorized" in err_str:
              from app.info_core import TOKEN_CACHE
              TOKEN_CACHE.pop(target_region, None)
-             raise HTTPException(status_code=401, detail="Token Expired Or Rejected Cache Cleared Try Again")
-        raise HTTPException(status_code=500, detail=f"Extraction Failed {str(e)}")
+             return JSONResponse(status_code=401, content={"Developer": "BITTU_DEV", "Error": "401 Unauthorized", "Message": "Token Expired Or Rejected. Cache Cleared. Try Again."})
+        
+        return JSONResponse(status_code=500, content={"Developer": "BITTU_DEV", "Error": "500 Internal Error", "Message": f"Extraction Failed: {str(e)}"})
