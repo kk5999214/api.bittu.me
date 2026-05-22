@@ -1,5 +1,6 @@
 import binascii
 import time
+import json
 import httpx
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
@@ -8,6 +9,7 @@ from google.protobuf.json_format import MessageToDict
 from app.settings import settings
 from proto import uid_generator_pb2
 from proto import data_pb2
+from proto import ClanInfo_pb2
 
 TOKEN_CACHE = {}
 JWT_API_BASE = "https://api.bittu.me"
@@ -106,4 +108,49 @@ async def extract_player_info(uid: str, region: str, jwt_token: str) -> dict:
     if "profileInfo" in result and "equippedSkills" in result["profileInfo"]:
         result["profileInfo"]["playerOutfits"] = result["profileInfo"].pop("equippedSkills")
         
+    return result
+
+async def extract_clan_info(clan_id: str, region: str, jwt_token: str) -> dict:
+    message = ClanInfo_pb2.ClanInfoRequest()
+    message.clan_id = int(clan_id)
+    protobuf_data = message.SerializeToString()
+    hex_data = binascii.hexlify(protobuf_data).decode()
+    
+    encrypted_hex = encrypt_aes(hex_data, settings.INFO_KEY, settings.INFO_IV)
+    
+    base_url = get_client_url(region).replace("/GetPlayerPersonalShow", "")
+    endpoint = f"{base_url}/GetClanInfoByClanID"
+    
+    headers = {
+        'User-Agent': 'Dalvik/2.1.0 (Linux; U; Android 15; I2404 Build/AP3A.240905.015.A2_V000L1)',
+        'Connection': 'Keep-Alive',
+        'Expect': '100-continue',
+        'Authorization': f'Bearer {jwt_token}',
+        'X-Unity-Version': '2018.4.11f1',
+        'X-GA': 'v1 1',
+        'ReleaseVersion': 'OB53',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept-Encoding': 'gzip'
+    }
+    
+    async with httpx.AsyncClient(verify=False) as client:
+        api_res = await client.post(endpoint, headers=headers, content=bytes.fromhex(encrypted_hex), timeout=15.0)
+        api_res.raise_for_status()
+        res_hex = api_res.content.hex()
+
+    if not res_hex:
+        raise ValueError("Garena Returned An Empty Clan Response")
+
+    clan_res = ClanInfo_pb2.ClanInfoResponse()
+    clan_res.ParseFromString(bytes.fromhex(res_hex))
+    result = MessageToDict(clan_res, preserving_proto_field_name=True)
+    
+    if "clan_tags" in result:
+        try: result["clan_tags"] = json.loads(result["clan_tags"])
+        except json.JSONDecodeError: pass
+        
+    if "officers" in result:
+        try: result["officers"] = json.loads(result["officers"])
+        except json.JSONDecodeError: pass
+
     return result
