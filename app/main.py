@@ -202,16 +202,16 @@ async def get_player_stats(uid: str = Query(...), region: str = Query("IND"), mo
             "level": basic_info.get("level", 0)
         }
 
+        # 💀 THE FINAL FIX: Fully personalized response block
         return JSONResponse(content={
-            "CREDITS": ["@spideyabd", "@INDRAJIT_1M"],
-            "JOIN": ["t.me/INDRAJITFREEAPI", "t.me/SPIDEYFREEFILES"],
+            "Developer": "BITTU_DEV",
+            "Status": "Success",
             "filters_applied": {
                 "mode": req_mode.upper() if req_mode else "ALL MODES",
                 "type": req_type if req_type else "ALL TYPES"
             },
             "profile": profile_result,
-            "stats": stats_output,
-            "success": True
+            "stats": stats_output
         })
 
     except Exception as e:
