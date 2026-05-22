@@ -1,4 +1,5 @@
 import binascii
+import time
 import httpx
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
@@ -7,6 +8,9 @@ from google.protobuf.json_format import MessageToDict
 from app.settings import settings
 from proto import uid_generator_pb2
 from proto import data_pb2
+
+TOKEN_CACHE = {}
+JWT_API_BASE = "https://api.bittu.me"
 
 def encrypt_aes(hex_data: str, key: str, iv: str) -> str:
     key_bytes = key.encode()[:16]
@@ -36,6 +40,28 @@ def reformat_entries(entries_list):
         if "unlockStatus" in entry:
             entry["unlockStatus"] = entry.pop("unlockStatus")
     return entries_list
+
+async def get_valid_jwt(region: str) -> str:
+    now = time.time()
+    
+    if region in TOKEN_CACHE and TOKEN_CACHE[region]["expires"] > now:
+        return TOKEN_CACHE[region]["token"]
+        
+    async with httpx.AsyncClient(verify=False) as client:
+        url = f"{JWT_API_BASE}/api/token?region={region}"
+        r = await client.get(url, timeout=20.0)
+        
+        if r.status_code != 200:
+            raise ValueError(f"HTTP Token Call Failed: {r.text}")
+            
+        data = r.json()
+        token = data.get("token") or data.get("Token")
+        
+        if not token or token == "0":
+            raise ValueError(f"JWT API Returned Invalid Token: {data}")
+            
+        TOKEN_CACHE[region] = {"token": token, "expires": now + 7200}
+        return token
 
 async def extract_player_info(uid: str, region: str, jwt_token: str) -> dict:
     message = uid_generator_pb2.uid_generator()
@@ -81,4 +107,3 @@ async def extract_player_info(uid: str, region: str, jwt_token: str) -> dict:
         result["profileInfo"]["playerOutfits"] = result["profileInfo"].pop("equippedSkills")
         
     return result
-
