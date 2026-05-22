@@ -1,6 +1,7 @@
 import json
 import os
 import random
+import asyncio
 from fastapi import FastAPI, Query, Body, Request
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
@@ -10,9 +11,10 @@ from typing import Optional
 
 from app.jwt_core import create_jwt
 from app.info_core import extract_player_info, get_valid_jwt
+from app.stats_core import extract_all_stats
 
-# Docs hidden for a stealthy, professional API feel
-app = FastAPI(title="BITTU__DEV Master API", version="7.0", docs_url=None, redoc_url=None)
+# Docs hidden for a stealthy, professional API feel 💀
+app = FastAPI(title="BITTU__DEV Master API", version="8.0", docs_url=None, redoc_url=None)
 
 ACCOUNTS_FILE = "GuestAccounts.json"
 
@@ -67,7 +69,6 @@ async def get_token(
     access_token: Optional[str] = Query(None),
     open_id: Optional[str] = Query(None)
 ):
-    
     if access_token and open_id:
         target_region = (region or "IND").upper()
         try:
@@ -159,4 +160,65 @@ async def get_player_info(uid: str = Query(...), region: str = Query("IND")):
              TOKEN_CACHE.pop(target_region, None)
              return JSONResponse(status_code=401, content={"Developer": "BITTU_DEV", "Error": "401 Unauthorized", "Message": "Token Expired Or Rejected. Cache Cleared. Try Again."})
         
+        return JSONResponse(status_code=500, content={"Developer": "BITTU_DEV", "Error": "500 Internal Error", "Message": f"Extraction Failed: {str(e)}"})
+
+@app.get("/stats")
+async def get_player_stats(uid: str = Query(...), region: str = Query("IND"), mode: Optional[str] = Query(None), type: Optional[str] = Query(None)):
+    target_region = region.upper()
+    
+    if not uid.isdigit():
+        return JSONResponse(status_code=400, content={"Developer": "BITTU_DEV", "Error": "400 Bad Request", "Message": "Invalid UID Format. Must Be Numeric."})
+
+    req_mode = None
+    if mode:
+        m = mode.strip().lower()
+        if m in ['br', 'battle royale']: req_mode = 'br'
+        elif m in ['cs', 'clash squad']: req_mode = 'cs'
+        else: req_mode = m
+
+    req_type = None
+    if type:
+        t = type.strip().lower()
+        if t in ['casual', 'normal']: req_type = 'NORMAL'
+        elif t in ['ranked', 'rank']: req_type = 'RANKED'
+        elif t in ['career', 'lifetime']: req_type = 'CAREER'
+        else: req_type = t.upper()
+
+    try:
+        jwt_token = await get_valid_jwt(target_region)
+        
+        # We Run Both Profile Fetching And Stat Fetching At The Exact Same Time For Maximum Speed ⚡
+        profile_task = extract_player_info(uid, target_region, jwt_token)
+        stats_task = extract_all_stats(uid, target_region, jwt_token, req_mode, req_type)
+        
+        profile_raw, stats_output = await asyncio.gather(profile_task, stats_task)
+
+        basic_info = profile_raw.get("basicInfo", {})
+        profile_result = {
+            "nickname": basic_info.get("nickname", "Unknown"),
+            "uid": str(uid),
+            "likes": basic_info.get("liked", 0),
+            "exp": basic_info.get("exp", 0),
+            "level": basic_info.get("level", 0)
+        }
+
+        return JSONResponse(content={
+            "CREDITS": ["@spideyabd", "@INDRAJIT_1M"],
+            "JOIN": ["t.me/INDRAJITFREEAPI", "t.me/SPIDEYFREEFILES"],
+            "filters_applied": {
+                "mode": req_mode.upper() if req_mode else "ALL MODES",
+                "type": req_type if req_type else "ALL TYPES"
+            },
+            "profile": profile_result,
+            "stats": stats_output,
+            "success": True
+        })
+
+    except Exception as e:
+        err_str = str(e).lower()
+        if "401" in err_str or "unauthorized" in err_str:
+             from app.info_core import TOKEN_CACHE
+             TOKEN_CACHE.pop(target_region, None)
+             return JSONResponse(status_code=401, content={"Developer": "BITTU_DEV", "Error": "401 Unauthorized", "Message": "Token Expired Or Rejected. Cache Cleared. Try Again."})
+             
         return JSONResponse(status_code=500, content={"Developer": "BITTU_DEV", "Error": "500 Internal Error", "Message": f"Extraction Failed: {str(e)}"})
