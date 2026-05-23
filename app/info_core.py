@@ -153,4 +153,8 @@ async def extract_clan_info(clan_id: str, region: str, jwt_token: str) -> dict:
         try: result["officers"] = json.loads(result["officers"])
         except json.JSONDecodeError: pass
 
+    keys_to_remove = [key for key in result.keys() if key.startswith("field_") or key.startswith("timestamp_")]
+    for key in keys_to_remove:
+        result.pop(key, None)
+
     return result
