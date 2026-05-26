@@ -139,17 +139,22 @@ async def get_player_info(uid: str = Query(...), region: Optional[str] = Query(N
     if not uid.isdigit():
         return JSONResponse(status_code=400, content={"Developer": "BITTU_DEV", "Error": "400 Bad Request", "Message": "Invalid UID Format. Must Be Numeric."})
 
+    # --- SMART REGION FALLBACK LOGIC ---
     target_region = region.upper() if region else None
 
     if not target_region:
         try:
             ban_data = await check_player_ban(uid)
-            target_region = ban_data.get("region", "").upper()
+            detected_region = ban_data.get("region", "").upper()
             
-            if not target_region or target_region == "N/A":
-                return JSONResponse(status_code=404, content={"Developer": "BITTU_DEV", "Error": "404 Not Found", "Message": "Could not auto-detect region. Please provide the ?region= parameter manually."})
-        except Exception as e:
-            return JSONResponse(status_code=500, content={"Developer": "BITTU_DEV", "Error": "500 Internal Error", "Message": f"Region auto-detect failed: {str(e)}"})
+            if not detected_region or detected_region == "N/A":
+                target_region = "IND"
+            else:
+                target_region = detected_region
+        except Exception:
+            # Silent Fallback To IND If Shop2Game Rejects Or Times Out
+            target_region = "IND"
+    # -----------------------------------
 
     try:
         jwt_token = await get_valid_jwt(target_region)
@@ -172,23 +177,27 @@ async def get_player_info(uid: str = Query(...), region: Optional[str] = Query(N
         
         return JSONResponse(status_code=500, content={"Developer": "BITTU_DEV", "Error": "500 Internal Error", "Message": f"Extraction Failed: {str(e)}"})
 
-
 @app.get("/stats")
 async def get_player_stats(uid: str = Query(...), region: Optional[str] = Query(None), mode: Optional[str] = Query(None), type: Optional[str] = Query(None)):
     if not uid.isdigit():
         return JSONResponse(status_code=400, content={"Developer": "BITTU_DEV", "Error": "400 Bad Request", "Message": "Invalid UID Format. Must Be Numeric."})
 
+    # --- SMART REGION FALLBACK LOGIC ---
     target_region = region.upper() if region else None
 
     if not target_region:
         try:
             ban_data = await check_player_ban(uid)
-            target_region = ban_data.get("region", "").upper()
+            detected_region = ban_data.get("region", "").upper()
             
-            if not target_region or target_region == "N/A":
-                return JSONResponse(status_code=404, content={"Developer": "BITTU_DEV", "Error": "404 Not Found", "Message": "Could not auto-detect region. Please provide the ?region= parameter manually."})
-        except Exception as e:
-            return JSONResponse(status_code=500, content={"Developer": "BITTU_DEV", "Error": "500 Internal Error", "Message": f"Region auto-detect failed: {str(e)}"})
+            if not detected_region or detected_region == "N/A":
+                target_region = "IND"
+            else:
+                target_region = detected_region
+        except Exception:
+            # Silent Fallback To IND If Shop2Game Rejects Or Times Out
+            target_region = "IND"
+    # -----------------------------------
 
     req_mode = None
     if mode:
