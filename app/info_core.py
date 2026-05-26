@@ -1,18 +1,36 @@
 import binascii
 import time
 import json
+import random
+import os
 import httpx
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 from google.protobuf.json_format import MessageToDict
+from upstash_redis.asyncio import Redis
 
 from app.settings import settings
 from proto import uid_generator_pb2
 from proto import data_pb2
 from proto import ClanInfo_pb2
+from app.jwt_core import create_jwt
 
-TOKEN_CACHE = {}
+# Initialize Serverless Redis connection automatically using Vercel Env Vars
+try:
+    redis = Redis.from_env()
+except Exception as e:
+    redis = None
+    print(f"Redis Initialization Warning: {e}")
+
 JWT_API_BASE = "https://api.bittu.me"
+ACCOUNTS_FILE = "GuestAccounts.json"
+
+def load_accounts_for_region(region: str):
+    if os.path.exists(ACCOUNTS_FILE):
+        with open(ACCOUNTS_FILE, "r") as f:
+            db = json.load(f)
+            return db.get(region, [])
+    return []
 
 def encrypt_aes(hex_data: str, key: str, iv: str) -> str:
     key_bytes = key.encode()[:16]
@@ -44,26 +62,39 @@ def reformat_entries(entries_list):
     return entries_list
 
 async def get_valid_jwt(region: str) -> str:
-    now = time.time()
+    region = region.upper()
+    redis_key = f"jwt_cache_{region}"
     
-    if region in TOKEN_CACHE and TOKEN_CACHE[region]["expires"] > now:
-        return TOKEN_CACHE[region]["token"]
-        
-    async with httpx.AsyncClient(verify=False) as client:
-        url = f"{JWT_API_BASE}/token?region={region}"
-        r = await client.get(url, timeout=20.0)
-        
-        if r.status_code != 200:
-            raise ValueError(f"HTTP Token Call Failed: {r.text}")
+    # 1. Ask Serverless Redis for a globally cached token
+    if redis:
+        cached_token = await redis.get(redis_key)
+        if cached_token:
+            return cached_token
             
-        data = r.json()
-        token = data.get("token") or data.get("Token")
+    # 2. If Cache Miss (or Redis fails), execute internal extraction logic
+    account_pool = load_accounts_for_region(region)
+    if not account_pool:
+        raise ValueError(f"No accounts available in pool for region {region}")
         
-        if not token or token == "0":
-            raise ValueError(f"JWT API Returned Invalid Token: {data}")
+    for _ in range(2):
+        active_account = random.choice(account_pool)
+        if not active_account.get("uid") or not active_account.get("password"):
+            continue
             
-        TOKEN_CACHE[region] = {"token": token, "expires": now + 7200}
-        return token
+        try:
+            # Generate JWT natively without network self-calling
+            result = await create_jwt(active_account["uid"], active_account["password"], region)
+            token = result.get("token")
+            
+            if token and token != "0":
+                # 3. Save to Redis globally with a 2-Hour TTL (7200 seconds)
+                if redis:
+                    await redis.set(redis_key, token, ex=7200)
+                return token
+        except Exception:
+            continue
+            
+    raise ValueError(f"Extraction Pipeline Exhausted: Failed to internally generate JWT for {region}.")
 
 async def extract_player_info(uid: str, region: str, jwt_token: str) -> dict:
     message = uid_generator_pb2.uid_generator()
