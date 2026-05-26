@@ -256,8 +256,9 @@ async def get_clan_data(id: str = Query(...), region: str = Query("IND")):
     except Exception as e:
         err_str = str(e).lower()
         if "401" in err_str or "unauthorized" in err_str:
-             from app.info_core import TOKEN_CACHE
-             TOKEN_CACHE.pop(target_region, None)
+             from app.info_core import redis
+             if redis:
+                 await redis.delete(f"jwt_cache_{target_region}")
              return JSONResponse(status_code=401, content={"Developer": "BITTU_DEV", "Error": "401 Unauthorized", "Message": "Token Expired Or Rejected. Cache Cleared. Try Again."})
              
         return JSONResponse(status_code=500, content={"Developer": "BITTU_DEV", "Error": "500 Internal Error", "Message": f"Extraction Failed: {str(e)}"})
