@@ -12,8 +12,8 @@ from typing import Optional
 from app.jwt_core import create_jwt
 from app.info_core import extract_player_info, extract_clan_info, get_valid_jwt
 from app.stats_core import extract_all_stats
+from app.ban_core import check_player_ban
 
-# Docs hidden for a stealthy, professional API feel 💀
 app = FastAPI(title="BITTU__DEV Master API", version="10.0", docs_url=None, redoc_url=None)
 
 ACCOUNTS_FILE = "GuestAccounts.json"
@@ -33,7 +33,6 @@ class TokenRequest(BaseModel):
     access_token: Optional[str] = None
     open_id: Optional[str] = None
 
-# --- PROFESSIONAL ERROR HANDLERS ---
 @app.exception_handler(StarletteHTTPException)
 async def custom_http_exception_handler(request: Request, exc: StarletteHTTPException):
     if exc.status_code == 404:
@@ -52,7 +51,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         status_code=400,
         content={"Developer": "BITTU_DEV", "Error": "400 Bad Request", "Message": "Parameter mismatch or invalid format."}
     )
-# -----------------------------------
 
 @app.get("/")
 async def root():
@@ -137,11 +135,21 @@ async def post_token(payload: TokenRequest = Body(...)):
     )
 
 @app.get("/info")
-async def get_player_info(uid: str = Query(...), region: str = Query("IND")):
-    target_region = region.upper()
-
+async def get_player_info(uid: str = Query(...), region: Optional[str] = Query(None)):
     if not uid.isdigit():
         return JSONResponse(status_code=400, content={"Developer": "BITTU_DEV", "Error": "400 Bad Request", "Message": "Invalid UID Format. Must Be Numeric."})
+
+    target_region = region.upper() if region else None
+
+    if not target_region:
+        try:
+            ban_data = await check_player_ban(uid)
+            target_region = ban_data.get("region", "").upper()
+            
+            if not target_region or target_region == "N/A":
+                return JSONResponse(status_code=404, content={"Developer": "BITTU_DEV", "Error": "404 Not Found", "Message": "Could not auto-detect region. Please provide the ?region= parameter manually."})
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"Developer": "BITTU_DEV", "Error": "500 Internal Error", "Message": f"Region auto-detect failed: {str(e)}"})
 
     try:
         jwt_token = await get_valid_jwt(target_region)
@@ -150,24 +158,37 @@ async def get_player_info(uid: str = Query(...), region: str = Query("IND")):
         return JSONResponse(content={
             "Developer": "BITTU_DEV",
             "Status": "Success",
+            "Region": target_region,
             "Data": result
         })
 
     except Exception as e:
         err_str = str(e).lower()
         if "401" in err_str or "unauthorized" in err_str:
-             from app.info_core import TOKEN_CACHE
-             TOKEN_CACHE.pop(target_region, None)
+             from app.info_core import redis
+             if redis:
+                 await redis.delete(f"jwt_cache_{target_region}")
              return JSONResponse(status_code=401, content={"Developer": "BITTU_DEV", "Error": "401 Unauthorized", "Message": "Token Expired Or Rejected. Cache Cleared. Try Again."})
         
         return JSONResponse(status_code=500, content={"Developer": "BITTU_DEV", "Error": "500 Internal Error", "Message": f"Extraction Failed: {str(e)}"})
 
+
 @app.get("/stats")
-async def get_player_stats(uid: str = Query(...), region: str = Query("IND"), mode: Optional[str] = Query(None), type: Optional[str] = Query(None)):
-    target_region = region.upper()
-    
+async def get_player_stats(uid: str = Query(...), region: Optional[str] = Query(None), mode: Optional[str] = Query(None), type: Optional[str] = Query(None)):
     if not uid.isdigit():
         return JSONResponse(status_code=400, content={"Developer": "BITTU_DEV", "Error": "400 Bad Request", "Message": "Invalid UID Format. Must Be Numeric."})
+
+    target_region = region.upper() if region else None
+
+    if not target_region:
+        try:
+            ban_data = await check_player_ban(uid)
+            target_region = ban_data.get("region", "").upper()
+            
+            if not target_region or target_region == "N/A":
+                return JSONResponse(status_code=404, content={"Developer": "BITTU_DEV", "Error": "404 Not Found", "Message": "Could not auto-detect region. Please provide the ?region= parameter manually."})
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"Developer": "BITTU_DEV", "Error": "500 Internal Error", "Message": f"Region auto-detect failed: {str(e)}"})
 
     req_mode = None
     if mode:
@@ -204,6 +225,7 @@ async def get_player_stats(uid: str = Query(...), region: str = Query("IND"), mo
         return JSONResponse(content={
             "Developer": "BITTU_DEV",
             "Status": "Success",
+            "Region": target_region,
             "filters_applied": {
                 "mode": req_mode.upper() if req_mode else "ALL MODES",
                 "type": req_type if req_type else "ALL TYPES"
@@ -215,8 +237,9 @@ async def get_player_stats(uid: str = Query(...), region: str = Query("IND"), mo
     except Exception as e:
         err_str = str(e).lower()
         if "401" in err_str or "unauthorized" in err_str:
-             from app.info_core import TOKEN_CACHE
-             TOKEN_CACHE.pop(target_region, None)
+             from app.info_core import redis
+             if redis:
+                 await redis.delete(f"jwt_cache_{target_region}")
              return JSONResponse(status_code=401, content={"Developer": "BITTU_DEV", "Error": "401 Unauthorized", "Message": "Token Expired Or Rejected. Cache Cleared. Try Again."})
              
         return JSONResponse(status_code=500, content={"Developer": "BITTU_DEV", "Error": "500 Internal Error", "Message": f"Extraction Failed: {str(e)}"})
@@ -227,7 +250,6 @@ async def get_ban_status(uid: str = Query(...)):
         return JSONResponse(status_code=400, content={"Developer": "BITTU_DEV", "Error": "400 Bad Request", "Message": "Invalid UID Format. Must Be Numeric."})
         
     try:
-        from app.ban_core import check_player_ban
         result = await check_player_ban(uid)
         
         return JSONResponse(content={
